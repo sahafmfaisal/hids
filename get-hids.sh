@@ -31,7 +31,6 @@ LOG_DIR="/var/log/hids"
 VENV_DIR="/opt/hids-venv"
 CLI_PATH="/usr/local/bin/hids"
 PORT=5000
-VERSION="2.0.0"
 
 # ── Colours ────────────────────────────────────────────────────────────────────
 R='\033[0;31m' G='\033[0;32m' C='\033[0;36m'
@@ -56,7 +55,7 @@ banner(){
     ╚═╝  ╚═╝╚═╝╚═════╝ ╚══════╝
 
 ART
-  echo -e "${N}${B}    Host-Based Intrusion Detection System${N}  ${D}v${VERSION}${N}"
+  echo -e "${N}${B}    Host-Based Intrusion Detection System${N}"
   echo -e "    ${D}ML-powered syscall behavioural analysis${N}\n"
   echo -e "    ${D}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${N}\n"
 }
@@ -104,7 +103,7 @@ esac
 ok "System packages ready"
 
 # ── Download HIDS source ───────────────────────────────────────────────────────
-step "Downloading HIDS v${VERSION}..."
+step "Downloading HIDS"
 rm -rf /tmp/hids-download
 mkdir -p /tmp/hids-download
 

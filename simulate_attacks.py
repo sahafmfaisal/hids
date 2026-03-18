@@ -1,7 +1,3 @@
-"""
-HIDS Attack Simulator — v6
-Usage:  python3 simulate_attacks.py [1-5|all]
-"""
 import subprocess, time, sys, os, threading
 
 RED    = "\033[91m"; YELLOW = "\033[93m"; GREEN  = "\033[92m"
@@ -127,7 +123,6 @@ def scenario_1():
     signal_stop()   # stop persistent signal
     time.sleep(3)   # let monitor show final suppressed scan
     print(f"\n  {RED}{BOLD}▲ Signal: sensitive_hits=7, open_count=38, write=0{RESET}")
-    print(f"  {RED}▲ Expected Detection → SENSITIVE FILE RECONNAISSANCE{RESET}\n")
 
 # ══════════════════════════════════════════════════════
 # S2: Privilege Escalation
@@ -174,7 +169,6 @@ def scenario_2():
     signal_stop()   # stop persistent signal
     time.sleep(3)   # let monitor show final suppressed scan
     print(f"\n  {RED}{BOLD}▲ Signal: sudoers_hits=2, sensitive_hits=5, privilege_used=1{RESET}")
-    print(f"  {RED}▲ Expected Detection → PRIVILEGE ESCALATION{RESET}\n")
 
 # ══════════════════════════════════════════════════════
 # S3: Bulk Data Exfiltration
@@ -224,8 +218,7 @@ def scenario_3():
     signal_stop()   # stop persistent signal
     time.sleep(3)   # let monitor show final suppressed scan
     print(f"\n  {RED}{BOLD}▲ Signal: write_count=312, delete_count=52, bulk_operation=1{RESET}")
-    print(f"  {RED}▲ Expected Detection → DATA EXFILTRATION + CLEANUP{RESET}\n")
-
+    
 # ══════════════════════════════════════════════════════
 # S4: Living-off-the-Land
 # ══════════════════════════════════════════════════════
@@ -273,7 +266,6 @@ def scenario_4():
     signal_stop()   # stop persistent signal
     time.sleep(3)   # let monitor show final suppressed scan
     print(f"\n  {RED}{BOLD}▲ Signal: write_count=74, sensitive_hits=3, exec_count=8{RESET}")
-    print(f"  {RED}▲ Expected Detection → SUSPICIOUS SCRIPT EXECUTION (LotL){RESET}\n")
 
 # ══════════════════════════════════════════════════════
 # S5: Log Tampering
@@ -325,7 +317,6 @@ def scenario_5():
     signal_stop()   # stop persistent signal
     time.sleep(3)   # let monitor show final suppressed scan
     print(f"\n  {RED}{BOLD}▲ Signal: chmod_count=2, log_hits=3, delete_count=2{RESET}")
-    print(f"  {RED}▲ Expected Detection → LOG TAMPERING / ANTI-FORENSICS{RESET}\n")
 
 # ══════════════════════════════════════════════════════
 SCENARIOS = {"1": scenario_1, "2": scenario_2, "3": scenario_3,
@@ -347,7 +338,7 @@ if __name__ == "__main__":
     print("  ██╔══██║██║██║  ██║╚════██║")
     print("  ██║  ██║██║██████╔╝███████║")
     print("  ╚═╝  ╚═╝╚═╝╚═════╝ ╚══════╝")
-    print(f"  Attack Simulator v6.0{RESET}")
+    print(f"  Attack Simulator {RESET}")
     print(f"  {DIM}Simulates 5 realistic insider threat / intrusion scenarios{RESET}")
     print(f"\n  {YELLOW}⚠  Educational use only — authorised systems only{RESET}")
     print(f"  {YELLOW}⚠  Wait for monitor.py to show SYSTEM SECURE before starting{RESET}\n")

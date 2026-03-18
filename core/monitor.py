@@ -1,8 +1,8 @@
 """
-HIDS Real Monitor — v9.2 (Real-Time Event-Driven + Regex Fix)
+HIDS Real Monitor — v9.3 (Interpreter Fingerprinting)
 ══════════════════════════════════════════════════════════════
-ALL features collected from REAL system data in real-time.
-Uses asynchronous threading and direct log tailing.
+Catches short-lived "flash" processes by correlating auditd
+paths with interpreter executables (Python, Perl, Awk).
 """
 
 import subprocess, json, time, os, sys, uuid, random, joblib, re, threading
@@ -26,7 +26,7 @@ event_lock = threading.Lock()
 realtime_features = {
     "open_count": 0, "read_count": 0, "write_count": 0, "exec_count": 0,
     "delete_count": 0, "chmod_count": 0, "privilege_used": 0,
-    "sensitive_hits": 0, "sudoers_hits": 0, "log_hits": 0
+    "sensitive_hits": 0, "sudoers_hits": 0, "log_hits": 0, "script_hits": 0
 }
 
 proc_prev_state = {}
@@ -48,7 +48,6 @@ CHMOD_EXE_BLOCK = {
     "/usr/bin/dconf", "/usr/lib/snapd/snapd", "/usr/bin/gnome-session-binary",
 }
 
-# Removed Python from here so we can catch Living-off-the-Land attacks!
 SENSITIVE_EXE_BLOCK = {
     "/usr/bin/sudo", "/usr/sbin/sudo", "/usr/sbin/cron", "/usr/bin/cron",
     "/usr/lib/polkit-1/polkitd", "/usr/libexec/gdm-session-worker",
@@ -129,11 +128,10 @@ def proc_poller_thread():
             realtime_features["write_count"] += writes
             realtime_features["exec_count"] += execs
             
-        time.sleep(0.2) # Dropped from 1.0s to 0.2s to catch rapid exfiltration
+        time.sleep(0.2)
 
 # ── THREAD 2: Audit Tailer ─────────────────────────────────
 def get_val(line, key):
-    # Fixed regex to grab unquoted values!
     m = re.search(rf'\b{key}=(?:"([^"]+)"|(\S+))', line)
     return m.group(1) or m.group(2) if m else None
 
@@ -160,7 +158,6 @@ def audit_tailer_thread():
         
         evt = audit_cache[evt_id]
 
-        # Smart PID exclusion (prevents friendly fire blindspots)
         pid = get_val(line, "pid")
         if pid in own_pids: continue
 
@@ -189,6 +186,10 @@ def audit_tailer_thread():
                     if path.startswith(w):
                         with event_lock:
                             realtime_features["sensitive_hits"] += 1
+                            # FINGERPRINTING: Is a script engine opening the file?
+                            if exe and any(x in exe for x in ["python", "perl", "awk", "bash", "sh", "ruby"]):
+                                realtime_features["script_hits"] += 1
+                                
                             if any(path.startswith(s) for s in SUDOERS_PATHS):
                                 realtime_features["sudoers_hits"] += 1
                             if any(path.startswith(l) for l in LOG_PATHS):
@@ -215,6 +216,7 @@ def get_avg():
 def normalize(raw, avg):
     return {k: max(0, v - avg.get(k,0)) for k,v in raw.items()}
 
+# FEATS must remain the original 8 so the ML model DataFrame doesn't crash
 FEATS = ["open_count","read_count","write_count","exec_count","delete_count","chmod_count","privilege_used","bulk_operation"]
 
 THREAT_META = {
@@ -232,29 +234,46 @@ def classify(f):
     w, d, c = f.get("write_count",0), f.get("delete_count",0), f.get("chmod_count",0)
     sh, su, lh = f.get("sensitive_hits",0), f.get("sudoers_hits",0), f.get("log_hits",0)
     e = f.get("exec_count",0)
+    scr = f.get("script_hits",0)
 
-    if c > 0 or lh > 0: return "LOG TAMPERING / ANTI-FORENSICS"
-    if w > 15 and d > 0: return "DATA EXFILTRATION + CLEANUP"
-    if w > 15:           return "BULK DATA EXFILTRATION"
-    if d > 5:            return "FILE DELETION / ANTI-FORENSICS"
-    if su > 0:           return "PRIVILEGE ESCALATION"
-    if e >= 2 or (sh > 0 and w > 0): return "SUSPICIOUS SCRIPT EXECUTION (LotL)"
-    if sh > 0:           return "SENSITIVE FILE RECONNAISSANCE"
+    if c > 0 or lh > 0: 
+        return "LOG TAMPERING / ANTI-FORENSICS"
+        
+    # S3: Relies on catching the mass deletion track-covering
+    if d > 15 or w > 40: 
+        return "DATA EXFILTRATION + CLEANUP"
+        
+    if su > 0 or f.get("privilege_used",0) > 0: 
+        return "PRIVILEGE ESCALATION"
+        
+    # S4: Relies on fingerprinting interpreters accessing watched paths
+    if scr > 0 or e >= 2: 
+        return "SUSPICIOUS SCRIPT EXECUTION (LotL)"
+        
+    if sh > 0: 
+        return "SENSITIVE FILE RECONNAISSANCE"
+        
     return "ANOMALOUS BEHAVIOUR"
 
 def predict(f):
-    if f.get("sensitive_hits",0) > 0 or f.get("sudoers_hits",0) > 0 or f.get("log_hits",0) > 0 or f.get("chmod_count",0) > 0:
+    # Instant overrides for deterministic signatures
+    if f.get("sudoers_hits",0) > 0 or f.get("log_hits",0) > 0 or f.get("chmod_count",0) > 0:
         return 1, 0.98
-    w, d, e = f.get("write_count",0), f.get("delete_count",0), f.get("exec_count",0)
-    if w > 15 or d > 5 or e >= 2:
-        return 1, 0.85
+    if f.get("script_hits",0) > 0:
+        return 1, 0.96
+    if f.get("sensitive_hits",0) > 0:
+        return 1, 0.91
+    if f.get("delete_count",0) > 15 or f.get("write_count",0) > 40:
+        return 1, 0.95
         
+    # Standard ML Prediction
     if MODEL_OK:
         try:
             x = pd.DataFrame([[f.get(k,0) for k in FEATS]], columns=FEATS)
             p = model.predict(x)[0]
             if p == 1: return int(p), float(model.predict_proba(x)[0][1])
         except: pass
+        
     return 0, 0.92
 
 def write_state(s):
@@ -293,7 +312,7 @@ def run():
 
         with event_lock:
             raw = dict(realtime_features)
-            for k in ["read_count", "write_count", "exec_count", "delete_count", "chmod_count", "sensitive_hits", "sudoers_hits", "log_hits"]:
+            for k in ["read_count", "write_count", "exec_count", "delete_count", "chmod_count", "sensitive_hits", "sudoers_hits", "log_hits", "script_hits"]:
                 realtime_features[k] = 0
 
         raw["bulk_operation"] = 1 if raw.get("open_count",0) > 20 else 0
