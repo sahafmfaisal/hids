@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>HIDS — Intrusion Detection Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Syne:wght@400;700;800&family=DM+Mono&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:       #040810;
+  --surf:     #080f1a;
+  --surf2:    #0c1624;
+  --line:     #0e2135;
+  --line2:    #163045;
+  --green:    #00ffa3;
+  --gdim:     #00664a;
+  --red:      #ff3356;
+  --rdim:     #660022;
+  --orange:   #ff7700;
+  --yellow:   #ffd000;
+  --cyan:     #00cfff;
+  --cdim:     #004466;
+  --magenta:  #cc44ff;
+  --white:    #ddeeff;
+  --dim:      #2a4a5e;
+  --dim2:     #1a2f3f;
+  --mono:     'IBM Plex Mono', monospace;
+  --head:     'Syne', sans-serif;
+  --data:     'DM Mono', monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg); color:var(--white);
+  font-family:var(--mono); font-size:13px;
+  min-height:100vh; overflow-x:hidden;
+}
+/* Noise texture overlay */
+body::after{
+  content:''; position:fixed; inset:0;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events:none; z-index:9999; opacity:.4;
+}
+
+/* ── TOPBAR ── */
+nav{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:0 24px; height:56px;
+  background:var(--surf); border-bottom:1px solid var(--line2);
+  position:sticky; top:0; z-index:100; gap:16px;
+}
+.nav-brand{display:flex;align-items:center;gap:14px}
+.brand-shield{
+  width:34px;height:34px;
+  border:1.5px solid var(--green); border-radius:3px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:17px;color:var(--green);
+  box-shadow:0 0 14px rgba(0,255,163,.25);
+  animation:glow 3s ease-in-out infinite;
+}
+@keyframes glow{0%,100%{box-shadow:0 0 10px rgba(0,255,163,.2)}50%{box-shadow:0 0 22px rgba(0,255,163,.5)}}
+.brand-name{font-family:var(--head);font-size:17px;font-weight:800;letter-spacing:4px;color:var(--white)}
+.brand-sub{font-size:9px;color:var(--dim);letter-spacing:2px;margin-top:1px}
+
+.nav-tabs{display:flex;gap:2px}
+.tab{
+  padding:6px 16px; font-size:11px; letter-spacing:1px;
+  color:var(--dim); cursor:pointer; border-radius:2px;
+  border:1px solid transparent; transition:all .2s;
+  font-family:var(--mono);
+}
+.tab:hover{color:var(--white);background:var(--surf2)}
+.tab.active{color:var(--cyan);border-color:var(--line2);background:var(--surf2)}
+
+.nav-right{display:flex;align-items:center;gap:16px}
+.status-pill{
+  display:flex;align-items:center;gap:7px;
+  padding:5px 12px; border-radius:2px;
+  border:1px solid var(--line2); font-size:10px;
+  letter-spacing:1.5px; font-family:var(--mono);
+  transition:all .3s;
+}
+.status-pip{width:7px;height:7px;border-radius:50%;transition:all .3s}
+#navStatus.secure   .status-pip{background:var(--green);box-shadow:0 0 8px var(--green)}
+#navStatus.alert    .status-pip{background:var(--red);box-shadow:0 0 10px var(--red);animation:pip-blink .4s infinite}
+#navStatus.suppressed .status-pip{background:var(--yellow);box-shadow:0 0 8px var(--yellow)}
+#navStatus.calibrating .status-pip{background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
+@keyframes pip-blink{0%,100%{opacity:1}50%{opacity:.1}}
+#navStatus.secure   .status-text{color:var(--green)}
+#navStatus.alert    .status-text{color:var(--red)}
+#navStatus.suppressed .status-text{color:var(--yellow)}
+#navStatus.calibrating .status-text{color:var(--cyan)}
+#navClock{font-size:10px;color:var(--dim);letter-spacing:1px}
+
+/* ── VIEWS ── */
+.view{display:none;padding:20px 24px;animation:fadeIn .3s ease}
+.view.active{display:block}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── GRID HELPERS ── */
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.grid-left{display:grid;grid-template-columns:340px 1fr;gap:16px;align-items:start}
+
+/* ── CARD ── */
+.card{background:var(--surf);border:1px solid var(--line2);border-radius:3px;overflow:hidden}
+.card-head{
+  padding:10px 16px; display:flex;align-items:center;justify-content:space-between;
+  border-bottom:1px solid var(--line); font-size:9px;
+  letter-spacing:2.5px; text-transform:uppercase; color:var(--cyan);
+  font-family:var(--mono);
+}
+.card-head::before{content:'//';color:var(--dim);margin-right:8px}
+.card-head-right{font-size:9px;color:var(--dim);letter-spacing:0}
+.card-body{padding:16px}
+
+/* ── KPI STRIP ── */
+.kpi-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:var(--line);margin-bottom:16px}
+.kpi{background:var(--surf);padding:14px 18px}
+.kpi-label{font-size:8px;letter-spacing:2px;color:var(--dim);text-transform:uppercase;margin-bottom:6px}
+.kpi-val{font-family:var(--head);font-size:26px;font-weight:800;line-height:1}
+.kpi-val.g{color:var(--green)} .kpi-val.r{color:var(--red)}
+.kpi-val.y{color:var(--yellow)} .kpi-val.c{color:var(--cyan)}
+.kpi-val.w{color:var(--white)}
+.kpi-sub{font-size:9px;color:var(--dim);margin-top:4px}
+
+/* ── LIVE ALERT CARD ── */
+.live-card{
+  border:1px solid var(--line2); border-radius:3px; overflow:hidden;
+  transition:border-color .3s; margin-bottom:16px;
+}
+.live-card.secure    {border-color:var(--gdim)}
+.live-card.alert     {border-color:var(--red);box-shadow:0 0 20px rgba(255,51,86,.1)}
+.live-card.suppressed{border-color:var(--yellow)}
+.live-card.calibrating{border-color:var(--cdim)}
+.lc-head{
+  padding:9px 14px; display:flex;align-items:center;justify-content:space-between;
+  font-size:10px; letter-spacing:2px; font-family:var(--mono);
+}
+.live-card.secure     .lc-head{background:rgba(0,255,163,.04);color:var(--green)}
+.live-card.alert      .lc-head{background:rgba(255,51,86,.1);color:var(--red)}
+.live-card.suppressed .lc-head{background:rgba(255,208,0,.06);color:var(--yellow)}
+.live-card.calibrating .lc-head{background:rgba(0,207,255,.06);color:var(--cyan)}
+.lc-body{padding:16px;display:flex;flex-direction:column;gap:12px}
+.lc-threat{font-family:var(--head);font-size:20px;font-weight:800;letter-spacing:1px}
+.live-card.alert      .lc-threat{color:var(--red)}
+.live-card.suppressed .lc-threat{color:var(--yellow)}
+.lc-meta{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.meta-k{font-size:8px;letter-spacing:2px;color:var(--dim);margin-bottom:3px}
+.meta-v{font-size:12px;color:var(--white)}
+.conf-track{height:3px;background:var(--line2);border-radius:2px;margin-top:4px}
+.conf-fill{height:100%;border-radius:2px;transition:width .8s ease}
+.live-card.alert      .conf-fill{background:var(--red);box-shadow:0 0 6px var(--red)}
+.live-card.suppressed .conf-fill{background:var(--yellow)}
+.mitre-chip{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:3px 9px; border-radius:2px;
+  background:rgba(0,207,255,.08);border:1px solid rgba(0,207,255,.2);
+  font-size:9px;color:var(--cyan);letter-spacing:1px;
+}
+.sev-chip{
+  padding:2px 8px;border-radius:2px;font-size:9px;letter-spacing:1px;
+}
+.sev-CRITICAL{background:rgba(255,51,86,.2);color:var(--red);border:1px solid var(--rdim)}
+.sev-HIGH    {background:rgba(255,119,0,.2);color:var(--orange);border:1px solid #552200}
+.sev-MEDIUM  {background:rgba(255,208,0,.15);color:var(--yellow);border:1px solid #554400}
+.sev-LOW     {background:rgba(0,255,163,.1);color:var(--green);border:1px solid var(--gdim)}
+.suppress-note{
+  font-size:10px;color:var(--dim);padding:8px 10px;
+  background:rgba(255,208,0,.04);border:1px solid rgba(255,208,0,.12);border-radius:2px;
+}
+.calib-wrap{padding:8px 0; display:flex;flex-direction:column;gap:8px}
+.calib-bar-track{height:5px;background:var(--line2);border-radius:3px;overflow:hidden}
+.calib-fill{height:100%;background:var(--cyan);box-shadow:0 0 8px var(--cyan);border-radius:3px;transition:width .5s}
+
+/* ── FEATURE BARS ── */
+.feat-row{display:flex;flex-direction:column;gap:3px;margin-bottom:9px}
+.feat-head{display:flex;justify-content:space-between;font-size:10px}
+.feat-name{color:var(--dim)} .feat-val{color:var(--white)}
+.feat-track{height:2px;background:var(--line2);border-radius:1px;overflow:hidden}
+.feat-fill{height:100%;border-radius:1px;transition:width .6s ease,background .3s}
+.feat-fill.ok{background:var(--gdim)}
+.feat-fill.lo{background:var(--yellow)}
+.feat-fill.hi{background:var(--red);box-shadow:0 0 4px var(--red)}
+
+/* ── CHARTS ── */
+canvas{display:block;width:100%!important}
+.chart-wrap{position:relative;height:180px}
+.chart-wrap.tall{height:220px}
+.chart-wrap.short{height:120px}
+
+/* ── EVENT FEED ── */
+.feed{display:flex;flex-direction:column;gap:3px;max-height:420px;overflow-y:auto;
+  scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+.feed-item{
+  display:grid;grid-template-columns:56px 70px 1fr;gap:8px;
+  padding:7px 10px;border-left:2px solid var(--line2);
+  font-size:10px;align-items:start;transition:background .15s;cursor:default;
+}
+.feed-item:hover{background:rgba(255,255,255,.02)}
+.feed-item.alert     {border-left-color:var(--red)}
+.feed-item.suppressed{border-left-color:var(--yellow)}
+.fi-time{color:var(--dim);font-size:9px;padding-top:1px}
+.fi-type{font-size:9px;letter-spacing:1px}
+.fi-type.alert     {color:var(--red)}
+.fi-type.suppressed{color:var(--yellow)}
+.fi-type.secure    {color:var(--gdim)}
+.fi-detail{color:var(--dim);font-size:9px;line-height:1.5}
+
+/* ── THREAT TABLE ── */
+.threat-table{width:100%;border-collapse:collapse}
+.threat-table th{
+  text-align:left;font-size:8px;letter-spacing:2px;color:var(--dim);
+  padding:6px 10px;border-bottom:1px solid var(--line);font-weight:400;
+}
+.threat-table td{padding:8px 10px;border-bottom:1px solid var(--line2);font-size:11px}
+.threat-table tr:last-child td{border-bottom:none}
+.threat-table tr:hover td{background:rgba(255,255,255,.015)}
+.pct-bar{height:3px;background:var(--red);border-radius:1px;margin-top:3px;min-width:3px}
+
+/* ── SESSION TABLE ── */
+.sess-table{width:100%;border-collapse:collapse}
+.sess-table th{font-size:8px;letter-spacing:2px;color:var(--dim);
+  padding:6px 10px;border-bottom:1px solid var(--line);font-weight:400;text-align:left}
+.sess-table td{padding:7px 10px;border-bottom:1px solid var(--line2);font-size:10px}
+.sess-table tr:hover td{background:rgba(255,255,255,.015)}
+
+/* ── HEATMAP ── */
+.heatmap-grid{display:flex;flex-wrap:wrap;gap:3px;padding:8px 0}
+.hm-cell{
+  width:14px;height:14px;border-radius:2px;background:var(--line2);
+  cursor:default;transition:transform .1s;position:relative;
+}
+.hm-cell:hover{transform:scale(1.4);z-index:10}
+.hm-cell.l1{background:#003322}
+.hm-cell.l2{background:#005a35}
+.hm-cell.l3{background:#008a4a}
+.hm-cell.l4{background:var(--green);box-shadow:0 0 4px var(--green)}
+.hm-month-labels{display:flex;gap:3px;padding:0 0 4px}
+.hm-label{font-size:8px;color:var(--dim);width:14px;text-align:center;overflow:hidden}
+
+/* ── SCAN TICK ── */
+#scanTick{
+  position:fixed;bottom:14px;right:18px;
+  font-size:9px;color:var(--dim);letter-spacing:1px;
+  display:flex;align-items:center;gap:5px;
+  background:var(--surf);padding:4px 10px;border:1px solid var(--line);border-radius:2px;
+}
+.spin{animation:spin 1.2s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+@media(max-width:1100px){
+  .kpi-strip{grid-template-columns:repeat(3,1fr)}
+  .grid-3,.grid-4{grid-template-columns:1fr 1fr}
+  .grid-left{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-brand">
+    <div class="brand-shield">⬡</div>
+    <div>
+      <div class="brand-name">HIDS</div>
+      <div class="brand-sub">HOST-BASED INTRUSION DETECTION</div>
+    </div>
+  </div>
+  <div class="nav-tabs">
+    <div class="tab active" onclick="showView('live')">LIVE</div>
+    <div class="tab" onclick="showView('analytics')">ANALYTICS</div>
+    <div class="tab" onclick="showView('history')">HISTORY</div>
+    <div class="tab" onclick="showView('sessions')">SESSIONS</div>
+  </div>
+  <div class="nav-right">
+    <div class="status-pill" id="navStatus">
+      <div class="status-pip"></div>
+      <span class="status-text" id="navStatusText">CONNECTING</span>
+    </div>
+    <div id="navClock"></div>
+  </div>
+</nav>
+
+<!-- KPI strip (always visible) -->
+<div class="kpi-strip" id="kpiStrip">
+  <div class="kpi"><div class="kpi-label">Total Alerts</div><div class="kpi-val r" id="kTotal">0</div><div class="kpi-sub">all time</div></div>
+  <div class="kpi"><div class="kpi-label">Today</div><div class="kpi-val y" id="kToday">0</div><div class="kpi-sub">unique detections</div></div>
+  <div class="kpi"><div class="kpi-label">Suppressed</div><div class="kpi-val" id="kSup">0</div><div class="kpi-sub">dedup hits</div></div>
+  <div class="kpi"><div class="kpi-label">Sessions</div><div class="kpi-val c" id="kSess">0</div><div class="kpi-sub">monitor runs</div></div>
+  <div class="kpi"><div class="kpi-label">Scans</div><div class="kpi-val w" id="kScans">0</div><div class="kpi-sub">this session</div></div>
+  <div class="kpi"><div class="kpi-label">Syscalls</div><div class="kpi-val g" id="kSyscalls">0</div><div class="kpi-sub">monitored</div></div>
+</div>
+
+<!-- ══ VIEW: LIVE ══ -->
+<div class="view active" id="view-live">
+  <div class="grid-left">
+    <!-- Left column: live card + features -->
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div id="liveCard"></div>
+
+      <div class="card">
+        <div class="card-head">Feature Vector <span class="card-head-right">11 indicators</span></div>
+        <div class="card-body" id="featureList"></div>
+      </div>
+    </div>
+
+    <!-- Right column: sparkline + event feed -->
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div class="card">
+        <div class="card-head">Syscall Activity <span class="card-head-right">last 60 scans</span></div>
+        <div class="card-body"><div class="chart-wrap short"><canvas id="sparkCanvas"></canvas></div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">Live Event Feed <span class="card-head-right" id="feedCount">0 events</span></div>
+        <div class="card-body" style="padding:8px">
+          <div class="feed" id="eventFeed"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ VIEW: ANALYTICS ══ -->
+<div class="view" id="view-analytics">
+  <div style="display:flex;flex-direction:column;gap:16px">
+
+    <!-- Intrusion frequency chart -->
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-head">Intrusion Frequency <span class="card-head-right">last 48 hours</span></div>
+        <div class="card-body"><div class="chart-wrap tall"><canvas id="freqChart"></canvas></div></div>
+      </div>
+      <div class="card">
+        <div class="card-head">Severity Distribution <span class="card-head-right">all time</span></div>
+        <div class="card-body"><div class="chart-wrap tall"><canvas id="sevChart"></canvas></div></div>
+      </div>
+    </div>
+
+    <!-- Heatmap -->
+    <div class="card">
+      <div class="card-head">Intrusion Heatmap <span class="card-head-right">last 60 days</span></div>
+      <div class="card-body">
+        <div class="hm-month-labels" id="hmLabels"></div>
+        <div class="heatmap-grid" id="heatmap"></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:9px;color:var(--dim)">
+          <span>Less</span>
+          <div style="width:12px;height:12px;background:var(--line2);border-radius:2px"></div>
+          <div class="hm-cell l1" style="position:static;width:12px;height:12px"></div>
+          <div class="hm-cell l2" style="position:static;width:12px;height:12px"></div>
+          <div class="hm-cell l3" style="position:static;width:12px;height:12px"></div>
+          <div class="hm-cell l4" style="position:static;width:12px;height:12px"></div>
+          <span>More</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Threat breakdown table -->
+    <div class="card">
+      <div class="card-head">Threat Type Breakdown <span class="card-head-right">unique alerts only</span></div>
+      <div class="card-body" style="padding:0">
+        <table class="threat-table" id="threatTable">
+          <thead><tr>
+            <th>THREAT TYPE</th><th>COUNT</th><th>AVG CONFIDENCE</th>
+            <th>LAST SEEN</th><th>FREQUENCY</th>
+          </tr></thead>
+          <tbody id="threatTbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ VIEW: HISTORY ══ -->
+<div class="view" id="view-history">
+  <div class="card">
+    <div class="card-head">
+      Alert History
+      <span class="card-head-right">
+        <input id="filterSev" placeholder="severity..." style="background:var(--surf2);border:1px solid var(--line2);color:var(--white);padding:2px 8px;font-size:10px;border-radius:2px;outline:none;width:100px">
+        <input id="filterThreat" placeholder="threat..." style="background:var(--surf2);border:1px solid var(--line2);color:var(--white);padding:2px 8px;font-size:10px;border-radius:2px;outline:none;width:140px;margin-left:6px">
+      </span>
+    </div>
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse" id="histTable">
+        <thead><tr style="font-size:8px;letter-spacing:2px;color:var(--dim)">
+          <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--line);font-weight:400">TIME</th>
+          <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--line);font-weight:400">THREAT TYPE</th>
+          <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--line);font-weight:400">SEVERITY</th>
+          <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--line);font-weight:400">CONFIDENCE</th>
+          <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--line);font-weight:400">MITRE</th>
+          <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--line);font-weight:400">STATUS</th>
+        </tr></thead>
+        <tbody id="histTbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ══ VIEW: SESSIONS ══ -->
+<div class="view" id="view-sessions">
+  <div class="card">
+    <div class="card-head">Session History</div>
+    <div style="overflow-x:auto">
+      <table class="sess-table" id="sessTable">
+        <thead><tr>
+          <th>SESSION ID</th><th>STARTED</th><th>DURATION</th>
+          <th>SCANS</th><th>ALERTS</th><th>SUPPRESSED</th><th>SYSCALLS</th>
+        </tr></thead>
+        <tbody id="sessTbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="scanTick"><span class="spin">◌</span><span id="scanLabel">connecting...</span></div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+const sparkData = Array(60).fill(0);
+let allAlerts = [], freqChart = null, sevChart = null;
+let currentView = 'live', feedCount = 0;
+const SPINNERS = ['◐','◓','◑','◒']; let si = 0;
+
+const FEATURES = [
+  {k:'open_count',    l:'File Opens',      max:80},
+  {k:'read_count',    l:'File Reads',      max:300},
+  {k:'write_count',   l:'File Writes',     max:350},
+  {k:'exec_count',    l:'Exec Events',     max:12},
+  {k:'delete_count',  l:'Deletions',       max:60},
+  {k:'chmod_count',   l:'Chmod Ops',       max:4},
+  {k:'sensitive_hits',l:'Sensitive Reads', max:8},
+  {k:'sudoers_hits',  l:'Sudoers Access',  max:4},
+  {k:'log_hits',      l:'Log File Reads',  max:6},
+  {k:'privilege_used',l:'Priv Abuse',      max:1},
+  {k:'bulk_operation',l:'Bulk Op',         max:1},
+];
+
+// ── Navigation ────────────────────────────────────────────────────────────────
+function showView(v) {
+  currentView = v;
+  document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+  document.getElementById('view-'+v).classList.add('active');
+  document.querySelectorAll('.tab').forEach(el => {
+    if (el.textContent.toLowerCase() === v.toUpperCase() || el.textContent.toLowerCase() === v)
+      el.classList.add('active');
+  });
+  if (v === 'analytics') loadAnalytics();
+  if (v === 'history')   loadHistory();
+  if (v === 'sessions')  loadSessions();
+}
+
+// ── Clock ──────────────────────────────────────────────────────────────────────
+setInterval(() => {
+  document.getElementById('navClock').textContent =
+    new Date().toISOString().replace('T',' ').slice(0,19)+' UTC';
+}, 1000);
+
+// ── KPI summary ───────────────────────────────────────────────────────────────
+async function loadSummary() {
+  try {
+    const d = await fetch('/api/summary').then(r=>r.json());
+    document.getElementById('kTotal').textContent   = d.total_alerts || 0;
+    document.getElementById('kToday').textContent   = d.today || 0;
+    document.getElementById('kSup').textContent     = d.suppressed || 0;
+    document.getElementById('kSess').textContent    = d.sessions || 0;
+  } catch(_){}
+}
+setInterval(loadSummary, 5000);
+loadSummary();
+
+// ── Live state (SSE) ──────────────────────────────────────────────────────────
+function connectSSE() {
+  const es = new EventSource('/stream');
+  es.onmessage = e => {
+    try { renderLive(JSON.parse(e.data)); } catch(_){}
+  };
+  es.onerror = () => setTimeout(connectSSE, 3000);
+}
+
+function renderLive(state) {
+  const st = state.status;
+  si = (si+1)%4;
+  document.getElementById('scanLabel').textContent =
+    `${SPINNERS[si]} scan #${state.scan_count||0}`;
+  document.getElementById('kScans').textContent =
+    (state.scan_count||0).toLocaleString();
+  document.getElementById('kSyscalls').textContent =
+    (state.stats?.syscalls||0).toLocaleString();
+
+  // Status pill
+  const pill = document.getElementById('navStatus');
+  pill.className = 'status-pill ' + st;
+  document.getElementById('navStatusText').textContent =
+    st==='secure'?'SECURE':st==='alert'?'⚠ THREAT DETECTED':
+    st==='suppressed'?'⊘ SUPPRESSED':st==='calibrating'?'CALIBRATING':'—';
+
+  renderLiveCard(state);
+  renderFeatures(state.features);
+  sparkData.push((state.stats?.syscalls||0) % 600);
+  sparkData.shift();
+  drawSparkline();
+
+  // Add to feed if alert or suppressed
+  if (st === 'alert' || st === 'suppressed') {
+    const a = state.last_alert || {};
+    addFeedItem({
+      type: st,
+      timestamp: state.timestamp,
+      threat: a.threat,
+      severity: a.severity,
+      suppressed: st === 'suppressed',
+      reason: state.last_alert?.reason,
+    });
+  }
+}
+
+function renderLiveCard(state) {
+  const el = document.getElementById('liveCard');
+  const st = state.status;
+
+  if (st === 'calibrating') {
+    const p = Math.round((state.baseline_progress/12)*100);
+    el.innerHTML = `<div class="live-card calibrating">
+      <div class="lc-head"><span>◉ CALIBRATING BASELINE</span><span>${fmt(state.timestamp)}</span></div>
+      <div class="lc-body">
+        <div class="calib-wrap">
+          <div style="font-size:11px;color:var(--cyan)">Profiling idle syscall behaviour — ${state.baseline_progress}/12 samples</div>
+          <div><div style="font-size:8px;color:var(--dim);margin-bottom:5px;letter-spacing:2px">PROGRESS ${p}%</div>
+          <div class="calib-bar-track"><div class="calib-fill" style="width:${p}%"></div></div></div>
+          <div style="font-size:9px;color:var(--dim)">Monitoring: openat · read · write · execve · unlink · chmod<br>Do not run simulations yet.</div>
+        </div>
+      </div>
+    </div>`; return;
+  }
+
+  if (st === 'secure') {
+    el.innerHTML = `<div class="live-card secure">
+      <div class="lc-head"><span>● SYSTEM SECURE</span><span>${fmt(state.timestamp)}</span></div>
+      <div class="lc-body" style="align-items:center;text-align:center;padding:24px">
+        <div style="font-size:32px;color:var(--green)">✓</div>
+        <div style="font-size:13px;color:var(--green);letter-spacing:3px;font-family:var(--mono)">ALL CLEAR</div>
+        <div style="font-size:10px;color:var(--dim)">No anomalies — all features within baseline bounds</div>
+        <div style="font-size:9px;color:var(--dim)">Model: RF+SVM · Scan #${state.scan_count} · Next in 2s</div>
+      </div>
+    </div>`; return;
+  }
+
+  const a = state.last_alert || {};
+  const isSup = st === 'suppressed';
+  const conf = (a.confidence||.95)*100;
+  el.innerHTML = `<div class="live-card ${st}">
+    <div class="lc-head">
+      <span>${isSup?'⊘ SUPPRESSED — THREAT ACTIVE':'⚠ INTRUSION DETECTED'}</span>
+      <span>${fmt(state.timestamp)}</span>
+    </div>
+    <div class="lc-body">
+      <div class="lc-threat">${a.threat||'ANOMALOUS BEHAVIOUR'}</div>
+      <div class="lc-meta">
+        <div><div class="meta-k">SEVERITY</div>
+          <div class="meta-v"><span class="sev-chip sev-${a.severity}">${a.severity||'—'}</span></div></div>
+        <div><div class="meta-k">CONFIDENCE</div>
+          <div class="meta-v" style="color:var(--${isSup?'yellow':'red'})">${conf.toFixed(1)}%
+            <div class="conf-track"><div class="conf-fill" style="width:${conf}%"></div></div>
+          </div></div>
+        <div><div class="meta-k">MITRE ATT&CK</div>
+          <div class="meta-v"><span class="mitre-chip">${a.mitre_id||'—'}</span></div></div>
+        <div><div class="meta-k">TECHNIQUE</div>
+          <div class="meta-v" style="font-size:10px;color:var(--dim)">${a.mitre_name||'—'}</div></div>
+      </div>
+      ${isSup ? `<div class="suppress-note">⊘ ${a.reason||'Duplicate detection within dedup window'}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+function renderFeatures(feats) {
+  if (!feats) return;
+  document.getElementById('featureList').innerHTML = FEATURES.map(f => {
+    const v = feats[f.k]||0;
+    const p = Math.min(100,(v/f.max)*100);
+    const cls = p>70?'hi':p>35?'lo':'ok';
+    return `<div class="feat-row">
+      <div class="feat-head"><span class="feat-name">${f.l}</span><span class="feat-val">${v}</span></div>
+      <div class="feat-track"><div class="feat-fill ${cls}" style="width:${p}%"></div></div>
+    </div>`;
+  }).join('');
+}
+
+function addFeedItem(evt) {
+  feedCount++;
+  document.getElementById('feedCount').textContent = feedCount + ' events';
+  const feed = document.getElementById('eventFeed');
+  const d = document.createElement('div');
+  d.className = `feed-item ${evt.type}`;
+  d.innerHTML = `
+    <span class="fi-time">${fmt(evt.timestamp)}</span>
+    <span class="fi-type ${evt.type}">${evt.type==='alert'?'⚠ ALERT':'⊘ SUPP'}</span>
+    <div class="fi-detail">
+      <span style="color:var(--white)">${evt.threat||''}</span>
+      ${evt.severity?`<span class="sev-chip sev-${evt.severity}" style="margin-left:4px">${evt.severity}</span>`:''}
+      ${evt.reason?`<br><span style="color:var(--dim)">${evt.reason}</span>`:''}
+    </div>`;
+  feed.prepend(d);
+  while(feed.children.length > 300) feed.removeChild(feed.lastChild);
+}
+
+// ── Sparkline ─────────────────────────────────────────────────────────────────
+function drawSparkline() {
+  const canvas = document.getElementById('sparkCanvas');
+  if (!canvas) return;
+  const W = canvas.parentElement.clientWidth, H = 120;
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+  const max = Math.max(20,...sparkData);
+  const step = W/(sparkData.length-1);
+  // Grid
+  [.25,.5,.75].forEach(f => {
+    ctx.beginPath(); ctx.strokeStyle='rgba(14,33,53,.8)'; ctx.lineWidth=1;
+    const y = H - f*(H-8)-4; ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
+  });
+  // Fill
+  ctx.beginPath();
+  sparkData.forEach((v,i) => {
+    const x=i*step, y=H-(v/max)*(H-8)-4;
+    i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+  });
+  ctx.strokeStyle='#00664a'; ctx.lineWidth=1.5; ctx.stroke();
+  ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath();
+  ctx.fillStyle='rgba(0,102,74,.12)'; ctx.fill();
+  // Current value dot
+  const last = sparkData[sparkData.length-1];
+  const lx = (sparkData.length-1)*step;
+  const ly = H-(last/max)*(H-8)-4;
+  ctx.beginPath(); ctx.arc(lx,ly,3,0,Math.PI*2);
+  ctx.fillStyle='var(--green)';
+  ctx.shadowColor='var(--green)'; ctx.shadowBlur=6; ctx.fill();
+}
+
+// ── ANALYTICS ─────────────────────────────────────────────────────────────────
+async function loadAnalytics() {
+  const [hourly, severity, breakdown, heatmap] =
+    await Promise.all([
+      fetch('/api/hourly').then(r=>r.json()),
+      fetch('/api/severity-counts').then(r=>r.json()),
+      fetch('/api/threat-breakdown').then(r=>r.json()),
+      fetch('/api/heatmap').then(r=>r.json()),
+    ]);
+
+  drawFreqChart(hourly.slice(0,24).reverse());
+  drawSevChart(severity);
+  renderThreatTable(breakdown);
+  renderHeatmap(heatmap);
+}
+
+function drawFreqChart(data) {
+  const canvas = document.getElementById('freqChart');
+  if (!canvas) return;
+  const W = canvas.parentElement.clientWidth, H = 220;
+  canvas.width=W; canvas.height=H;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+  if (!data.length) return;
+
+  const maxV = Math.max(1,...data.map(d=>d.alert_count));
+  const barW = Math.max(4, (W - 40) / data.length - 3);
+  const pad = 30;
+
+  // Axes
+  ctx.strokeStyle='#163045'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(pad,10); ctx.lineTo(pad,H-20); ctx.lineTo(W-10,H-20); ctx.stroke();
+
+  data.forEach((d,i) => {
+    const x = pad + i * ((W-pad-10)/data.length) + 3;
+    const bh = Math.max(2, (d.alert_count/maxV)*(H-40));
+    const y  = H-20-bh;
+
+    // Bar
+    const g = ctx.createLinearGradient(0,y,0,H-20);
+    g.addColorStop(0,'rgba(255,51,86,.9)');
+    g.addColorStop(1,'rgba(255,51,86,.2)');
+    ctx.fillStyle = d.alert_count>0 ? g : '#0e2135';
+    ctx.fillRect(x,y,barW,bh);
+
+    // Hour label (every 4)
+    if (i%4===0) {
+      ctx.fillStyle='#2a4a5e'; ctx.font='8px IBM Plex Mono';
+      ctx.fillText(d.hour?.slice(11)||'', x, H-6);
+    }
+  });
+
+  // Y labels
+  [0,.5,1].forEach(f => {
+    const y = H-20 - f*(H-40);
+    ctx.fillStyle='#2a4a5e'; ctx.font='8px IBM Plex Mono';
+    ctx.fillText(Math.round(f*maxV), 2, y+3);
+  });
+}
+
+function drawSevChart(data) {
+  const canvas = document.getElementById('sevChart');
+  if (!canvas) return;
+  const W = canvas.parentElement.clientWidth, H = 220;
+  canvas.width=W; canvas.height=H;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+
+  const SEV = ['CRITICAL','HIGH','MEDIUM','LOW'];
+  const COLORS = ['#ff3356','#ff7700','#ffd000','#00ffa3'];
+  const total = SEV.reduce((s,k) => s+(data[k]||0), 0) || 1;
+
+  if (total === 1 && !Object.keys(data).length) {
+    ctx.fillStyle='#2a4a5e'; ctx.font='12px IBM Plex Mono';
+    ctx.fillText('No data yet', W/2-40, H/2);
+    return;
+  }
+
+  // Donut
+  const cx=W/2, cy=H/2-10, r=70, ir=45;
+  let startAngle = -Math.PI/2;
+  SEV.forEach((s,i) => {
+    const v = data[s]||0;
+    const slice = (v/total)*Math.PI*2;
+    ctx.beginPath();
+    ctx.moveTo(cx,cy);
+    ctx.arc(cx,cy,r,startAngle,startAngle+slice);
+    ctx.fillStyle = COLORS[i];
+    ctx.globalAlpha = v>0 ? 1 : 0.15;
+    ctx.fill();
+    startAngle += slice;
+  });
+  ctx.globalAlpha=1;
+  // Inner hole
+  ctx.beginPath(); ctx.arc(cx,cy,ir,0,Math.PI*2);
+  ctx.fillStyle=document.body.style.background || '#040810';
+  ctx.fill();
+  // Centre text
+  ctx.fillStyle='#ddeeff'; ctx.font='bold 18px Syne'; ctx.textAlign='center';
+  ctx.fillText(total, cx, cy+6);
+  ctx.fillStyle='#2a4a5e'; ctx.font='8px IBM Plex Mono';
+  ctx.fillText('TOTAL', cx, cy+20);
+  ctx.textAlign='left';
+  // Legend
+  SEV.forEach((s,i) => {
+    const ly = H-60+i*14;
+    ctx.fillStyle=COLORS[i]; ctx.fillRect(W-90, ly, 10, 10);
+    ctx.fillStyle='#2a4a5e'; ctx.font='9px IBM Plex Mono';
+    ctx.fillText(`${s}  ${data[s]||0}`, W-76, ly+8);
+  });
+}
+
+function renderThreatTable(data) {
+  const max = data[0]?.count || 1;
+  document.getElementById('threatTbody').innerHTML = data.map(r => `
+    <tr>
+      <td style="color:var(--white);font-size:11px">${r.threat}</td>
+      <td style="color:var(--red);font-family:var(--data)">${r.count}</td>
+      <td style="color:var(--cyan)">${(r.avg_conf*100).toFixed(1)}%</td>
+      <td style="color:var(--dim);font-size:10px">${r.last_seen?.slice(0,16)||'—'}</td>
+      <td style="min-width:80px">
+        <div class="pct-bar" style="width:${Math.round((r.count/max)*80)}px"></div>
+      </td>
+    </tr>`).join('');
+}
+
+function renderHeatmap(data) {
+  const byDay = {}; data.forEach(d => byDay[d.day]=d.count);
+  const end = new Date(); const start = new Date(); start.setDate(end.getDate()-59);
+  const cells = [];
+  for (let d=new Date(start); d<=end; d.setDate(d.getDate()+1)) {
+    const key = d.toISOString().slice(0,10);
+    cells.push({day:key, count:byDay[key]||0});
+  }
+  const max = Math.max(1,...cells.map(c=>c.count));
+  document.getElementById('heatmap').innerHTML = cells.map(c => {
+    const lvl = c.count===0?'':c.count<max*.25?'l1':c.count<max*.5?'l2':c.count<max*.75?'l3':'l4';
+    return `<div class="hm-cell ${lvl}" title="${c.day}: ${c.count} alerts"></div>`;
+  }).join('');
+}
+
+// ── HISTORY ───────────────────────────────────────────────────────────────────
+async function loadHistory() {
+  const data = await fetch('/api/alerts').then(r=>r.json());
+  allAlerts = data;
+  renderHistTable(allAlerts);
+  document.getElementById('filterSev').oninput =
+  document.getElementById('filterThreat').oninput = filterHistory;
+}
+
+function filterHistory() {
+  const s = document.getElementById('filterSev').value.toUpperCase();
+  const t = document.getElementById('filterThreat').value.toUpperCase();
+  renderHistTable(allAlerts.filter(a =>
+    (!s || a.severity.includes(s)) &&
+    (!t || a.threat.includes(t))
+  ));
+}
+
+function renderHistTable(data) {
+  document.getElementById('histTbody').innerHTML = data.map(a => {
+    const feats = typeof a.features==='string' ? JSON.parse(a.features||'{}') : (a.features||{});
+    return `<tr>
+      <td style="font-size:10px;color:var(--dim)">${a.timestamp?.slice(0,19)||'—'}</td>
+      <td style="font-size:11px;color:${a.suppressed?'var(--dim)':'var(--white)'}">${a.threat}</td>
+      <td><span class="sev-chip sev-${a.severity}">${a.severity}</span></td>
+      <td style="color:var(--cyan);font-family:var(--data)">${(a.confidence*100).toFixed(1)}%</td>
+      <td><span class="mitre-chip">${a.mitre_id||'—'}</span></td>
+      <td><span style="font-size:9px;color:${a.suppressed?'var(--yellow)':'var(--green)'}">${a.suppressed?'SUPPRESSED':'ALERTED'}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+// ── SESSIONS ──────────────────────────────────────────────────────────────────
+async function loadSessions() {
+  const data = await fetch('/api/sessions').then(r=>r.json());
+  document.getElementById('sessTbody').innerHTML = data.map(s => {
+    const dur = s.ended_at && s.started_at ?
+      Math.round((new Date(s.ended_at)-new Date(s.started_at))/1000) : 0;
+    const h=Math.floor(dur/3600), m=Math.floor((dur%3600)/60), sec=dur%60;
+    return `<tr>
+      <td style="font-family:var(--data);font-size:10px;color:var(--cyan)">${s.id}</td>
+      <td style="font-size:10px;color:var(--dim)">${s.started_at?.slice(0,19)||'—'}</td>
+      <td style="font-family:var(--data)">${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}</td>
+      <td style="color:var(--white)">${s.total_scans}</td>
+      <td style="color:var(--red)">${s.total_alerts}</td>
+      <td style="color:var(--yellow)">${s.suppressed}</td>
+      <td style="color:var(--green)">${(s.syscalls||0).toLocaleString()}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function fmt(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleTimeString('en-GB',{hour12:false});
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+// Load feed history
+fetch('/api/alerts/live').then(r=>r.json()).then(data => {
+  data.slice().reverse().forEach(a => addFeedItem({
+    type: a.suppressed?'suppressed':'alert',
+    timestamp: a.timestamp,
+    threat: a.threat,
+    severity: a.severity,
+    reason: a.reason,
+  }));
+}).catch(()=>{});
+
+connectSSE();
+loadSummary();
+setInterval(loadSummary, 8000);
+</script>
+</body>
+</html>

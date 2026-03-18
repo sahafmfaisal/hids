@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+# ═══════════════════════════════════════════════════════════
+#  hids — CLI for Host-Based Intrusion Detection System
+#  Installed at: /usr/local/bin/hids
+# ═══════════════════════════════════════════════════════════
+
+INSTALL_DIR="/opt/hids"
+DATA_DIR="/var/lib/hids"
+LOG_DIR="/var/log/hids"
+VENV_DIR="/opt/hids-venv"
+PYTHON="$VENV_DIR/bin/python3"
+PORT=5000
+VERSION="2.0.0"
+REPO="https://github.com/sahafmfaisal/hids"
+RAW="https://raw.githubusercontent.com/sahafmfaisal/hids/main"
+
+R='\033[0;31m' G='\033[0;32m' C='\033[0;36m'
+Y='\033[1;33m' B='\033[1m'   D='\033[2m' N='\033[0m'
+
+ok()  { echo -e "  ${G}✓${N}  $1"; }
+fail(){ echo -e "  ${R}✗${N}  $1"; }
+info(){ echo -e "  ${D}  $1${N}"; }
+head(){ echo -e "\n  ${C}${B}$1${N}"; }
+
+need_root(){
+  [[ $EUID -ne 0 ]] && { echo -e "  ${Y}⚠${N}  Run as root: sudo hids $1"; exit 1; }
+}
+
+cmd_status(){
+  head "HIDS Service Status"
+  echo ""
+  for svc in hids-monitor hids-dashboard; do
+    if systemctl is-active --quiet "$svc" 2>/dev/null; then
+      local uptime=$(systemctl show "$svc" --property=ActiveEnterTimestamp \
+        --value 2>/dev/null | xargs -I{} date -d "{}" "+%H:%M:%S %d/%m/%y" 2>/dev/null || echo "")
+      echo -e "  ${G}●${N}  ${B}${svc}${N}  ${D}running${N}  ${D}since ${uptime}${N}"
+    else
+      echo -e "  ${R}●${N}  ${B}${svc}${N}  ${R}stopped${N}"
+    fi
+  done
+
+  echo ""
+  # DB stats
+  if [[ -f "$DATA_DIR/hids.db" ]]; then
+    local alerts=$(sqlite3 "$DATA_DIR/hids.db" \
+      "SELECT COUNT(*) FROM alerts WHERE suppressed=0" 2>/dev/null || echo "?")
+    local sessions=$(sqlite3 "$DATA_DIR/hids.db" \
+      "SELECT COUNT(*) FROM sessions" 2>/dev/null || echo "?")
+    info "Total alerts : ${alerts}"
+    info "Sessions     : ${sessions}"
+    info "Database     : ${DATA_DIR}/hids.db"
+  fi
+
+  info "Dashboard    : http://localhost:${PORT}"
+  info "Logs         : ${LOG_DIR}/"
+  echo ""
+}
+
+cmd_start(){
+  need_root "start"
+  head "Starting HIDS..."
+  systemctl start hids-monitor hids-dashboard
+  sleep 1
+  ok "hids-monitor started"
+  ok "hids-dashboard started"
+  echo -e "\n  ${C}Dashboard: http://localhost:${PORT}${N}\n"
+}
+
+cmd_stop(){
+  need_root "stop"
+  head "Stopping HIDS..."
+  systemctl stop hids-monitor hids-dashboard
+  ok "All services stopped"
+  echo ""
+}
+
+cmd_restart(){
+  need_root "restart"
+  head "Restarting HIDS..."
+  systemctl restart hids-monitor hids-dashboard
+  sleep 1
+  ok "Services restarted"
+  echo -e "  ${C}Dashboard: http://localhost:${PORT}${N}\n"
+}
+
+cmd_open(){
+  local url="http://localhost:${PORT}"
+  head "Opening Dashboard"
+  echo -e "  ${C}${url}${N}\n"
+  if command -v xdg-open &>/dev/null; then
+    xdg-open "$url" 2>/dev/null &
+  elif command -v open &>/dev/null; then
+    open "$url"
+  else
+    info "Open manually: ${url}"
+  fi
+}
+
+cmd_logs(){
+  head "HIDS Monitor — Live Logs  (Ctrl+C to exit)"
+  echo ""
+  tail -f "$LOG_DIR/monitor.log" 2>/dev/null || \
+    journalctl -u hids-monitor -f 2>/dev/null || \
+    fail "No logs found. Is HIDS running? Try: sudo hids start"
+}
+
+cmd_demo(){
+  head "Running Attack Simulation"
+  echo -e "  ${Y}⚠  Make sure the dashboard shows SYSTEM SECURE first${N}"
+  echo -e "  ${D}  Open: http://localhost:${PORT}${N}\n"
+  read -rp "  Press Enter to start simulation..." _
+  echo ""
+  if [[ -f "$INSTALL_DIR/simulate_attacks.py" ]]; then
+    cd "$INSTALL_DIR"
+    "$PYTHON" simulate_attacks.py all
+  else
+    fail "simulate_attacks.py not found at ${INSTALL_DIR}"
+  fi
+}
+
+cmd_update(){
+  need_root "update"
+  head "Updating HIDS..."
+  echo -e "  ${D}  Downloading latest version from GitHub...${N}\n"
+  curl -fsSL "${RAW}/get-hids.sh" | sudo bash
+}
+
+cmd_uninstall(){
+  need_root "uninstall"
+  head "Uninstalling HIDS"
+  echo -e "  ${Y}This will remove HIDS and all services.${N}"
+  echo -e "  ${D}  Your alert data at ${DATA_DIR} will be kept.${N}"
+  echo ""
+  read -rp "  Type 'yes' to confirm: " confirm
+  [[ "$confirm" != "yes" ]] && { echo -e "  Cancelled.\n"; exit 0; }
+  echo ""
+  systemctl stop    hids-monitor hids-dashboard 2>/dev/null || true
+  systemctl disable hids-monitor hids-dashboard 2>/dev/null || true
+  rm -f /etc/systemd/system/hids-monitor.service
+  rm -f /etc/systemd/system/hids-dashboard.service
+  systemctl daemon-reload
+  rm -rf "$INSTALL_DIR" "$VENV_DIR"
+  rm -f /usr/local/bin/hids
+  rm -f /etc/audit/rules.d/hids.rules
+  { augenrules --load > /dev/null 2>&1 || true; }
+  ok "HIDS uninstalled"
+  info "Data kept at: ${DATA_DIR}"
+  info "Logs kept at: ${LOG_DIR}"
+  echo ""
+}
+
+cmd_version(){
+  echo -e "\n  ${C}${B}HIDS${N}  v${VERSION}  ${D}Host-Based Intrusion Detection System${N}\n"
+}
+
+cmd_help(){
+  echo -e "${C}${B}"
+  cat << 'ART'
+
+  ██╗  ██╗██╗██████╗ ███████╗
+  ██║  ██║██║██╔══██╗██╔════╝
+  ███████║██║██║  ██║███████╗
+  ██╔══██║██║██║  ██║╚════██║
+  ██║  ██║██║██████╔╝███████║
+  ╚═╝  ╚═╝╚═╝╚═════╝ ╚══════╝
+ART
+  echo -e "${N}"
+  echo -e "  ${B}Host-Based Intrusion Detection System${N}  v${VERSION}"
+  echo -e "  ${D}ML-powered syscall behavioural analysis${N}"
+  echo ""
+  echo -e "  ${B}USAGE${N}"
+  echo -e "    hids <command>"
+  echo ""
+  echo -e "  ${B}COMMANDS${N}"
+  echo -e "    ${C}status${N}       Show service health and stats"
+  echo -e "    ${C}start${N}        Start monitor + dashboard services"
+  echo -e "    ${C}stop${N}         Stop all services"
+  echo -e "    ${C}restart${N}      Restart all services"
+  echo -e "    ${C}open${N}         Open dashboard in browser"
+  echo -e "    ${C}logs${N}         Tail live monitor logs"
+  echo -e "    ${C}demo${N}         Run attack simulation (5 scenarios)"
+  echo -e "    ${C}update${N}       Update to latest version"
+  echo -e "    ${C}uninstall${N}    Remove HIDS completely"
+  echo -e "    ${C}version${N}      Show version"
+  echo ""
+  echo -e "  ${B}INSTALL${N}"
+  echo -e "    ${D}curl -fsSL https://raw.githubusercontent.com/sahafmfaisal/hids/main/get-hids.sh | sudo bash${N}"
+  echo ""
+  echo -e "  ${B}DASHBOARD${N}"
+  echo -e "    ${D}http://localhost:${PORT}${N}"
+  echo ""
+}
+
+# ── Router ──────────────────────────────────────────────────────────────────
+CMD="${1:-help}"
+case "$CMD" in
+  status)    cmd_status    ;;
+  start)     cmd_start     ;;
+  stop)      cmd_stop      ;;
+  restart)   cmd_restart   ;;
+  open)      cmd_open      ;;
+  logs)      cmd_logs      ;;
+  demo)      cmd_demo      ;;
+  update)    cmd_update    ;;
+  uninstall) cmd_uninstall ;;
+  version|-v|--version) cmd_version ;;
+  help|-h|--help|*)     cmd_help    ;;
+esac
