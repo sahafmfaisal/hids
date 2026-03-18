@@ -4,20 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>HIDS — Intrusion Detection</title>
-<!-- Taruno Wide (primary display font) + Sora (UI) + JetBrains Mono (data) -->
-<link rel="preconnect" href="https://fonts.cdnfonts.com">
+<!-- Zalando Sans Expanded (display) + Sora (UI) + JetBrains Mono (data) -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.cdnfonts.com/css/taruno-wide" rel="stylesheet">
-<style>
-@font-face {
-  font-family: 'Taruno Wide';
-  font-style: normal;
-  font-weight: 500;
-  src: url('https://fonts.cdnfonts.com/s/107059/TarunowideMedium-JR94B.woff') format('woff');
-  font-display: block;
-}
-</style>
+<link href="https://fonts.googleapis.com/css2?family=Zalando+Sans+Expanded:ital,wght@0,200..900;1,200..900&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 /* ╔══════════════════════════════════════════════════════╗
@@ -54,7 +44,7 @@
   --r: 10px;   /* card radius */
   --r2: 6px;   /* inner radius */
 
-  --display: 'Taruno Wide', sans-serif;
+  --display: 'Zalando Sans Expanded', sans-serif;
   --cond:    'Sora', sans-serif;
   --mono:    'JetBrains Mono', monospace;
 }
@@ -121,7 +111,7 @@ body {
 .nav-link {
   font-family: var(--cond);
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 700;
   letter-spacing: 1px;
   text-transform: uppercase;
   color: var(--t3);
@@ -291,7 +281,7 @@ body {
 }
 .hero-sub {
   font-family: var(--cond);
-  font-size: 10px; font-weight: 500;
+  font-size: 10px; font-weight: 700;
   letter-spacing: 3px;
   color: var(--t3);
   text-transform: uppercase;
@@ -355,7 +345,7 @@ body {
   padding: 4px 0;
 }
 .sig-info { display: flex; flex-direction: column; gap: 1px; }
-.sig-name { font-family: var(--cond); font-size: 9px; font-weight: 500; letter-spacing: 1.5px; color: var(--t3); text-transform: uppercase; }
+.sig-name { font-family: var(--cond); font-size: 9px; font-weight: 700; letter-spacing: 1.5px; color: var(--t3); text-transform: uppercase; }
 .sig-val  { font-family: var(--display); font-size: 16px; color: var(--t1); }
 .sig-val.active { color: var(--t1); }
 /* Toggle pill — exact Phoenix style */
@@ -396,7 +386,7 @@ body {
   margin-top: 8px;
 }
 .hm-item { display: flex; flex-direction: column; gap: 2px; }
-.hm-label { font-family: var(--cond); font-size: 9px; font-weight: 500; letter-spacing: 2px; color: var(--t2); text-transform: uppercase; }
+.hm-label { font-family: var(--cond); font-size: 9px; font-weight: 700; letter-spacing: 2px; color: var(--t2); text-transform: uppercase; }
 .hm-val   { font-family: var(--display); font-size: 17px; color: var(--t1); }
 .hm-val.orange { color: var(--orange); }
 .hm-val.red    { color: var(--red); }
@@ -430,7 +420,7 @@ body {
 .detail-cell { display: flex; flex-direction: column; gap: 2px; }
 .dc-label {
   font-family: var(--cond);
-  font-size: 9px; font-weight: 500;
+  font-size: 9px; font-weight: 700;
   letter-spacing: 1.5px;
   color: var(--t3); text-transform: uppercase;
 }
@@ -466,7 +456,7 @@ body {
   border-bottom: 1px solid var(--border);
 }
 .feat-row:last-child { border-bottom: none; }
-.feat-name { font-family: var(--cond); font-size: 10px; font-weight: 500; letter-spacing: .5px; color: var(--t2); }
+.feat-name { font-family: var(--cond); font-size: 10px; font-weight: 700; letter-spacing: .5px; color: var(--t2); }
 .feat-num  { font-family: var(--mono); font-size: 10px; color: var(--t1); text-align: right; }
 .feat-bar-track { height: 3px; background: var(--inset); border-radius: 2px; overflow: hidden; }
 .feat-bar-fill  { height: 100%; border-radius: 2px; transition: width .6s ease, background .3s; background: var(--raised); }
@@ -513,7 +503,7 @@ body {
 .status-tile.calibrating .volt-num { color: var(--cyan); }
 .volt-label {
   font-family: var(--cond);
-  font-size: 10px; font-weight: 500;
+  font-size: 10px; font-weight: 700;
   letter-spacing: 3px;
   color: var(--t3);
   text-align: center;
@@ -559,7 +549,7 @@ body {
   border: 1px solid var(--border-hi);
   border-radius: 10px;
   font-family: var(--cond);
-  font-size: 9px; font-weight: 500;
+  font-size: 9px; font-weight: 700;
   letter-spacing: 1px;
   color: var(--t2);
 }
@@ -573,7 +563,7 @@ body {
 }
 .rh-meta { display: flex; flex-direction: column; gap: 8px; }
 .rh-row  { display: flex; justify-content: space-between; align-items: center; }
-.rh-k    { font-family: var(--cond); font-size: 9px; font-weight: 500; letter-spacing: 1.5px; color: var(--t3); text-transform: uppercase; }
+.rh-k    { font-family: var(--cond); font-size: 9px; font-weight: 700; letter-spacing: 1.5px; color: var(--t3); text-transform: uppercase; }
 .rh-v    { font-family: var(--mono); font-size: 10px; color: var(--t1); }
 .mitre-tag {
   padding: 2px 8px;
@@ -632,7 +622,7 @@ body {
   justify-content: space-between;
   width: 100%;
   font-family: var(--cond);
-  font-size: 9px; font-weight: 500;
+  font-size: 9px; font-weight: 700;
   color: var(--t3);
   letter-spacing: 1px;
   margin-top: -4px;
@@ -666,7 +656,7 @@ body {
 }
 .tp-title { font-family: var(--display); font-size: 13px; letter-spacing: 2px; color: var(--t1); }
 .tp-badge {
-  font-family: var(--cond); font-size: 9px; font-weight: 500;
+  font-family: var(--cond); font-size: 9px; font-weight: 700;
   letter-spacing: 1px; color: var(--t3);
   padding: 2px 8px;
   background: var(--raised);
@@ -720,7 +710,7 @@ body {
 .feed-item.alert     { border-left: 2px solid var(--red); }
 .feed-item.suppressed{ border-left: 2px solid var(--orange); }
 .fi-time  { font-family: var(--mono); font-size: 9px; color: var(--t3); padding-top: 1px; }
-.fi-type  { font-family: var(--cond); font-size: 9px; font-weight: 500; letter-spacing: 1px; }
+.fi-type  { font-family: var(--cond); font-size: 9px; font-weight: 700; letter-spacing: 1px; }
 .fi-type.alert      { color: var(--red); }
 .fi-type.suppressed { color: var(--orange); }
 .fi-detail { font-family: var(--mono); font-size: 9px; color: var(--t2); line-height: 1.5; }
@@ -757,7 +747,7 @@ canvas { display: block; width: 100% !important; }
 
 /* Tables */
 .data-table { width: 100%; border-collapse: collapse; }
-.data-table th { font-family: var(--cond); font-size: 9px; font-weight: 500; letter-spacing: 2px; color: var(--t3); text-transform: uppercase; padding: 8px 14px; text-align: left; border-bottom: 1px solid var(--border); }
+.data-table th { font-family: var(--cond); font-size: 9px; font-weight: 700; letter-spacing: 2px; color: var(--t3); text-transform: uppercase; padding: 8px 14px; text-align: left; border-bottom: 1px solid var(--border); }
 .data-table td { padding: 9px 14px; border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 10px; }
 .data-table tr:last-child td { border-bottom: none; }
 .data-table tr:hover td { background: var(--raised); }
@@ -951,7 +941,7 @@ canvas { display: block; width: 100% !important; }
             style="transition:stroke-dashoffset .9s ease,stroke .3s"/>
           <!-- indicator dot -->
           <circle id="gaugePin" cx="20" cy="100" r="5" fill="var(--orange)" style="filter:drop-shadow(0 0 4px var(--orange));transition:all .9s ease"/>
-          <text id="gaugePct" x="100" y="88" text-anchor="middle" font-family="Taruno Wide" font-size="22" fill="var(--t1)" font-weight="500">—</text>
+          <text id="gaugePct" x="100" y="88" text-anchor="middle" font-family="Zalando Sans Expanded" font-size="22" fill="var(--t1)" font-weight="500">—</text>
           <text x="100" y="102" text-anchor="middle" font-family="Sora" font-size="9" fill="var(--t3)" letter-spacing="2" font-weight="600">CONFIDENCE</text>
         </svg>
         <div class="gauge-bottom-row"><span>0%</span><span>100%</span></div>
@@ -1177,7 +1167,7 @@ function renderHero(s){
   });
   // Central node circle
   paths+=`<circle cx="${startX}" cy="${H/2}" r="18" fill="var(--card-bg2)" stroke="var(--orange)" stroke-width="1.5"/>`;
-  paths+=`<text x="${startX}" y="${H/2+5}" text-anchor="middle" font-family="Taruno Wide" font-size="8" font-weight="500" fill="var(--orange)">SYS</text>`;
+  paths+=`<text x="${startX}" y="${H/2+5}" text-anchor="middle" font-family="Zalando Sans Expanded" font-size="8" font-weight="500" fill="var(--orange)">SYS</text>`;
   svg.innerHTML=paths;
 }
 
@@ -1377,7 +1367,7 @@ function drawSev(data){
   });
   ctx.beginPath();ctx.arc(cx,cy,ir,0,Math.PI*2);
   ctx.fillStyle=isDark?'#1E1E1E':'#EBEBEB';ctx.fill();
-  ctx.fillStyle=isDark?'#F2F2F2':'#1A1A1A';ctx.font='500 16px Taruno Wide';
+  ctx.fillStyle=isDark?'#F2F2F2':'#1A1A1A';ctx.font='700 16px Zalando Sans Expanded';
   ctx.textAlign='center';ctx.fillText(total,cx,cy+7);
   ctx.fillStyle='rgba(255,255,255,0.3)';ctx.font='8px Sora';
   ctx.fillText('TOTAL',cx,cy+19);ctx.textAlign='left';
@@ -1386,7 +1376,7 @@ function drawSev(data){
     ctx.fillStyle=COL[i];ctx.fillRect(W*.64,ly,8,8);
     ctx.fillStyle=isDark?'rgba(255,255,255,0.55)':'rgba(0,0,0,0.5)';ctx.font='10px Sora';
     ctx.fillText(s,W*.64+14,ly+8);
-    ctx.fillStyle=COL[i];ctx.font='500 11px Taruno Wide';
+    ctx.fillStyle=COL[i];ctx.font='700 11px Zalando Sans Expanded';
     ctx.fillText(`${data[s]||0}`,W*.64+80,ly+8);
   });
 }
