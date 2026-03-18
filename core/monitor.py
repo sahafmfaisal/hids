@@ -1,28 +1,13 @@
 """
-HIDS Real Monitor — v8
+HIDS Real Monitor — v9 (Real-Time Event-Driven)
 ══════════════════════════════════════════════════════════════
-ALL features collected from REAL system data every 2 seconds.
-No signal files. No fake data. Real /proc + auditd parsing.
-
-  /proc based:
-    open_count     — open file descriptors across user PIDs
-    read_count     — syscr delta from /proc/[pid]/io
-    write_count    — syscw delta from /proc/[pid]/io
-    exec_count     — new suspicious cmdlines since last scan
-    privilege_used — new root process spawned by login user
-
-  auditd based (noise-filtered):
-    delete_count   — unlink/unlinkat/rmdir, exe-allowlisted
-    chmod_count    — chmod ops, noisy desktop exes blocked
-    sensitive_hits — openat on watched paths, system exes blocked
-    sudoers_hits   — /etc/sudoers access
-    log_hits       — /var/log/auth.log or syslog access
-
-  derived:
-    bulk_operation — open_count > 20 after baseline subtraction
+ALL features collected from REAL system data in real-time.
+Uses asynchronous threading and direct log tailing to ensure 
+zero missed events between scan intervals.
 """
 
-import subprocess, json, time, os, sys, uuid, random, joblib, pandas as pd
+import subprocess, json, time, os, sys, uuid, random, joblib, re, threading
+import pandas as pd
 from datetime import datetime
 
 # ── Config ─────────────────────────────────────────────────
@@ -30,15 +15,24 @@ BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "model.pkl")
 STATE_FILE = os.environ.get("HIDS_STATE", "/var/lib/hids/state.json")
 LOG_DIR    = "/var/log/hids"
-
-TIMESTAMP_FILE     = os.path.join(BASE_DIR, "last_audit_ts.txt")
-PROC_STATE_FILE    = os.path.join(BASE_DIR, "proc_state.json")
-CMDLINE_STATE_FILE = os.path.join(BASE_DIR, "cmdline_state.json")
-BASELINE_FILE      = os.path.join(BASE_DIR, "baseline.json")
+AUDIT_LOG  = "/var/log/audit/audit.log"
+BASELINE_FILE = os.path.join(BASE_DIR, "baseline.json")
 
 SCAN_INTERVAL  = 2
 BASELINE_SCANS = 12
 DEDUP_WINDOW   = 10
+
+# ── Shared Memory & Locks (The Real-Time Engine) ───────────
+event_lock = threading.Lock()
+realtime_features = {
+    "open_count": 0, "read_count": 0, "write_count": 0, "exec_count": 0,
+    "delete_count": 0, "chmod_count": 0, "privilege_used": 0,
+    "sensitive_hits": 0, "sudoers_hits": 0, "log_hits": 0
+}
+
+proc_prev_state = {}
+proc_prev_cmds = set()
+audit_cache = {} # Correlates multiline audit events
 
 # ── Load ML model ──────────────────────────────────────────
 try:
@@ -69,47 +63,31 @@ TARGET_UID_STR = str(TARGET_UID)
 
 # ── Noise filter lists ─────────────────────────────────────
 CHMOD_EXE_BLOCK = {
-    "/usr/bin/gnome-shell",
-    "/usr/share/antigravity/antigravity",
-    "/usr/bin/apt-get", "/usr/bin/apt",
-    "/usr/libexec/dconf-service", "/usr/bin/dconf",
-    "/usr/lib/snapd/snapd",
-    "/usr/bin/gnome-session-binary",
+    "/usr/bin/gnome-shell", "/usr/share/antigravity/antigravity",
+    "/usr/bin/apt-get", "/usr/bin/apt", "/usr/libexec/dconf-service", 
+    "/usr/bin/dconf", "/usr/lib/snapd/snapd", "/usr/bin/gnome-session-binary",
 }
 
 SENSITIVE_EXE_BLOCK = {
-    "/usr/bin/sudo", "/usr/sbin/sudo",
-    "/usr/sbin/cron", "/usr/bin/cron",
-    "/usr/lib/polkit-1/polkitd",
-    "/usr/libexec/gdm-session-worker",
-    "/usr/lib/tracker-miner-fs-3",
-    "/usr/libexec/tracker-miner-fs-3",
-    "/usr/libexec/tracker-extract-3",
-    "/usr/bin/dconf", "/usr/sbin/sssd",
-    "/usr/sbin/ausearch", "/usr/bin/ausearch",
-    "/usr/bin/python3.12", "/usr/bin/python3.11",
-    "/usr/bin/python3.10", "/usr/bin/python3",
-    "/usr/bin/apt-get", "/usr/bin/apt",
-    "/usr/bin/logname", "/usr/bin/id",
-    "/usr/libexec/packagekitd",
-    "/usr/sbin/NetworkManager",
+    "/usr/bin/sudo", "/usr/sbin/sudo", "/usr/sbin/cron", "/usr/bin/cron",
+    "/usr/lib/polkit-1/polkitd", "/usr/libexec/gdm-session-worker",
+    "/usr/lib/tracker-miner-fs-3", "/usr/libexec/tracker-miner-fs-3",
+    "/usr/libexec/tracker-extract-3", "/usr/bin/dconf", "/usr/sbin/sssd",
+    "/usr/sbin/ausearch", "/usr/bin/ausearch", "/usr/bin/python3.12", 
+    "/usr/bin/python3.11", "/usr/bin/python3.10", "/usr/bin/python3",
+    "/usr/bin/apt-get", "/usr/bin/apt", "/usr/bin/logname", "/usr/bin/id",
+    "/usr/libexec/packagekitd", "/usr/sbin/NetworkManager",
     "/usr/lib/accountsservice/accounts-daemon",
 }
 
 DELETE_EXE_ALLOW = {
-    "/usr/bin/rm", "/bin/rm",
-    "/usr/bin/bash", "/bin/bash",
-    "/usr/bin/sh", "/bin/sh",
-    "/usr/bin/python3", "/usr/bin/python",
-    "/usr/bin/perl", "/usr/bin/awk",
-    "/usr/bin/find", "/bin/find",
-    "/usr/bin/dd", "/bin/dd",
-    "/usr/bin/tar", "/bin/tar",
-    "/usr/bin/unlink",
+    "/usr/bin/rm", "/bin/rm", "/usr/bin/bash", "/bin/bash", "/usr/bin/sh", 
+    "/bin/sh", "/usr/bin/python3", "/usr/bin/python", "/usr/bin/perl", 
+    "/usr/bin/awk", "/usr/bin/find", "/bin/find", "/usr/bin/dd", "/bin/dd",
+    "/usr/bin/tar", "/bin/tar", "/usr/bin/unlink",
 }
 
-SENSITIVE_PATHS = {"/etc/shadow", "/etc/sudoers", "/etc/sudoers.d",
-                   "/etc/crontab", "/etc/cron.d"}
+SENSITIVE_PATHS = {"/etc/shadow", "/etc/sudoers", "/etc/sudoers.d", "/etc/crontab", "/etc/cron.d"}
 SUDOERS_PATHS   = {"/etc/sudoers", "/etc/sudoers.d"}
 LOG_PATHS       = {"/var/log/auth.log", "/var/log/syslog"}
 ALL_WATCHED     = SENSITIVE_PATHS | LOG_PATHS | {"/etc/passwd", "/etc/group"}
@@ -128,7 +106,7 @@ HIDS_FILES = {
     "state.json","hids.db","alerts.jsonl","db.py",
 }
 
-# ── /proc samplers ─────────────────────────────────────────
+# ── THREAD 1: Proc Poller ──────────────────────────────────
 def get_user_pids(excluded=None):
     excluded = excluded or set()
     pids = []
@@ -175,134 +153,120 @@ def check_priv(pid):
     except: pass
     return False
 
-def collect_proc():
+def proc_poller_thread():
+    global proc_prev_state, proc_prev_cmds
     own_pid  = os.getpid()
     own_ppid = os.getppid()
-    excl = {own_pid, own_ppid}
     mon_pid = os.environ.get("HIDS_MONITOR_PID","")
-    if mon_pid.isdigit(): excl.add(int(mon_pid))
+    
+    while True:
+        excl = {own_pid, own_ppid}
+        if mon_pid.isdigit(): excl.add(int(mon_pid))
+        pids = get_user_pids(excl)
 
-    pids = get_user_pids(excl)
+        opens=0; reads=0; writes=0; execs=0; priv=0
+        new_state={}; new_cmds=set()
 
-    prev_state = {}
-    try:
-        with open(PROC_STATE_FILE) as f: prev_state = json.load(f)
-    except: pass
+        for pid in pids:
+            opens += read_fd_count(pid)
+            r, w   = read_io(pid)
+            new_state[str(pid)] = {"r":r,"w":w}
+            prev = proc_prev_state.get(str(pid),{"r":0,"w":0})
+            reads  += max(0, r - prev["r"])
+            writes += max(0, w - prev["w"])
 
-    prev_cmds = set()
-    try:
-        with open(CMDLINE_STATE_FILE) as f: prev_cmds = set(json.load(f))
-    except: pass
+            cmd = read_cmdline(pid)
+            if cmd:
+                new_cmds.add(cmd)
+                base = cmd.split()[0].split("/")[-1] if cmd.split() else ""
+                if base in SUSPICIOUS_CMDS and cmd not in proc_prev_cmds:
+                    execs += 1
 
-    opens=0; reads=0; writes=0; execs=0; priv=0
-    new_state={}; new_cmds=set()
+            if check_priv(pid): priv = 1
 
-    for pid in pids:
-        opens += read_fd_count(pid)
-        r, w   = read_io(pid)
-        new_state[str(pid)] = {"r":r,"w":w}
-        prev = prev_state.get(str(pid),{"r":0,"w":0})
-        reads  += max(0, r - prev["r"])
-        writes += max(0, w - prev["w"])
+        proc_prev_state = new_state
+        proc_prev_cmds = new_cmds
 
-        cmd = read_cmdline(pid)
-        if cmd:
-            new_cmds.add(cmd)
-            base = cmd.split()[0].split("/")[-1] if cmd.split() else ""
-            if base in SUSPICIOUS_CMDS and cmd not in prev_cmds:
-                execs += 1
+        with event_lock:
+            realtime_features["open_count"] += opens
+            realtime_features["read_count"] += reads
+            realtime_features["write_count"] += writes
+            realtime_features["exec_count"] += execs
+            realtime_features["privilege_used"] += priv
+            
+        time.sleep(1.0) # Poll proc every 1 second
 
-        if check_priv(pid): priv = 1
+# ── THREAD 2: Audit Tailer ─────────────────────────────────
+def audit_tailer_thread():
+    if not os.path.exists(AUDIT_LOG):
+        print(f"[WARNING] Cannot find {AUDIT_LOG}. Threat detection will be limited to /proc.")
+        return
 
-    try:
-        with open(PROC_STATE_FILE,"w") as f: json.dump(new_state,f)
-        with open(CMDLINE_STATE_FILE,"w") as f: json.dump(list(new_cmds),f)
-    except: pass
+    f = open(AUDIT_LOG, "r")
+    f.seek(0, 2) # Start at the end of the file
 
-    return {"open_count":opens,"read_count":reads,"write_count":writes,
-            "exec_count":execs,"privilege_used":priv}
-
-# ── auditd sampler ─────────────────────────────────────────
-def collect_audit():
-    ts = None
-    try:
-        with open(TIMESTAMP_FILE) as f: ts = f.read().strip()
-    except: pass
-    now_ts = datetime.now().strftime("%H:%M:%S")
-    try:
-        with open(TIMESTAMP_FILE,"w") as f: f.write(now_ts)
-    except: pass
-
-    cmd = ["ausearch","-k","hids","--format","raw"]
-    if ts: cmd += ["-ts", ts]
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-        log = r.stdout
-    except: return {"delete_count":0,"chmod_count":0,"sensitive_hits":0,"sudoers_hits":0,"log_hits":0}
-
-    feats = {"delete_count":0,"chmod_count":0,"sensitive_hits":0,"sudoers_hits":0,"log_hits":0}
-    OWN = str(os.getpid()); OWN_P = str(os.getppid())
-
-    for entry in log.split("----"):
-        if not entry.strip(): continue
-        if f"pid={OWN} " in entry or f"pid={OWN_P} " in entry: continue
-
-        entry_paths = [
-            p.split("=",1)[1].strip('"')
-            for line in entry.split("\n")
-            if "type=PATH" in line and "name=" in line
-            for p in line.split() if p.startswith("name=")
-        ]
-        if entry_paths and all(os.path.basename(p) in HIDS_FILES for p in entry_paths):
+    while True:
+        line = f.readline()
+        if not line:
+            time.sleep(0.05) # Wait for new logs
             continue
 
-        auid=sc=exe=None
+        msg_match = re.search(r'audit\([^:]+:(\d+)\)', line)
+        if not msg_match: continue
+        evt_id = msg_match.group(1)
 
-        for line in entry.split("\n"):
-            if "type=SYSCALL" in line:
-                for p in line.split():
-                    if p.startswith("syscall="): sc   = p.split("=")[1]
-                    if p.startswith("auid="):    auid = p.split("=")[1]
-                    if p.startswith("exe="):     exe  = p.split("=",1)[1].strip('"')
+        # LRU cache management to correlate multi-line audit events
+        if evt_id not in audit_cache:
+            audit_cache[evt_id] = {}
+            if len(audit_cache) > 500:
+                audit_cache.pop(next(iter(audit_cache)))
+        
+        evt = audit_cache[evt_id]
 
-                if auid != TARGET_UID_STR: continue
+        if "type=SYSCALL" in line:
+            auid_m = re.search(r'auid=(\d+)', line)
+            exe_m  = re.search(r'exe="([^"]+)"', line)
+            sc_m   = re.search(r'syscall=(\d+)', line)
 
-                # delete
-                if sc in ("87","263","84"):
-                    if exe and exe in DELETE_EXE_ALLOW:
-                        feats["delete_count"] += 1
+            if auid_m: evt["auid"] = auid_m.group(1)
+            if exe_m:  evt["exe"] = exe_m.group(1)
 
-                # chmod — block known noisy sources
-                if sc in ("90","91","268"):
-                    if not (exe and (
-                        exe in CHMOD_EXE_BLOCK
-                        or "firefox" in exe
-                        or "snap" in exe
-                    )):
-                        feats["chmod_count"] += 1
+            if evt.get("auid") != TARGET_UID_STR: continue
+            
+            sc  = sc_m.group(1) if sc_m else None
+            exe = evt.get("exe")
 
-            elif "type=PATH" in line and "name=" in line:
-                # block system processes from sensitive_hits
-                if exe and (
-                    exe in SENSITIVE_EXE_BLOCK
-                    or "tracker" in exe
-                    or "ausearch" in exe
-                    or exe.endswith(("/python3.12","/python3.11","/python3.10"))
-                ): continue
+            with event_lock:
+                if sc in ("87","263","84") and exe in DELETE_EXE_ALLOW:
+                    realtime_features["delete_count"] += 1
+                if sc in ("90","91","268") and not (exe and (exe in CHMOD_EXE_BLOCK or "firefox" in exe or "snap" in exe)):
+                    realtime_features["chmod_count"] += 1
 
-                for p in line.split():
-                    if p.startswith("name="):
-                        path = p.split("=",1)[1].strip('"')
-                        if not path or path=="(null)": continue
-                        for w in ALL_WATCHED:
-                            if path.startswith(w):
-                                feats["sensitive_hits"] += 1
-                                if any(path.startswith(s) for s in SUDOERS_PATHS):
-                                    feats["sudoers_hits"] += 1
-                                if any(path.startswith(l) for l in LOG_PATHS):
-                                    feats["log_hits"] += 1
-                                break
-    return feats
+        elif "type=PATH" in line and "name=" in line:
+            if evt.get("auid") != TARGET_UID_STR: continue
+            exe = evt.get("exe", "")
+            
+            # Block system noise
+            if exe and (exe in SENSITIVE_EXE_BLOCK or "tracker" in exe or "ausearch" in exe or exe.endswith(("/python3.12","/python3.11","/python3.10"))):
+                continue
+            
+            path_m = re.search(r'name="([^"]+)"', line)
+            if path_m:
+                path = path_m.group(1)
+                # Ignore paths directly referencing HIDS files
+                if os.path.basename(path) in HIDS_FILES: continue
+                if path == "(null)": continue
+
+                for w in ALL_WATCHED:
+                    if path.startswith(w):
+                        with event_lock:
+                            realtime_features["sensitive_hits"] += 1
+                            if any(path.startswith(s) for s in SUDOERS_PATHS):
+                                realtime_features["sudoers_hits"] += 1
+                            if any(path.startswith(l) for l in LOG_PATHS):
+                                realtime_features["log_hits"] += 1
+                        break
+
 
 # ── Baseline ───────────────────────────────────────────────
 def load_baseline():
@@ -312,8 +276,6 @@ def load_baseline():
 
 def save_baseline(b):
     with open(BASELINE_FILE,"w") as f: json.dump(b,f)
-
-def baseline_ready(): return len(load_baseline().get("scans",[])) >= BASELINE_SCANS
 
 def update_baseline(raw):
     b = load_baseline(); b["scans"].append(raw); save_baseline(b)
@@ -364,6 +326,7 @@ def predict(f):
             prob = model.predict_proba(x)[0]
             return int(p), float(prob[1] if p==1 else prob[0])
         except: pass
+    
     # rule fallback
     w,d,c  = f.get("write_count",0), f.get("delete_count",0), f.get("chmod_count",0)
     sh,su,lh = f.get("sensitive_hits",0), f.get("sudoers_hits",0), f.get("log_hits",0)
@@ -371,14 +334,13 @@ def predict(f):
         return 1, 0.85
     return 0, 0.92
 
-# ── State writer ────────────────────────────────────────────
+# ── State / DB writers ──────────────────────────────────────
 def write_state(s):
     os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
     tmp = STATE_FILE + ".tmp"
     with open(tmp,"w") as f: json.dump(s,f)
     os.replace(tmp, STATE_FILE)
 
-# ── DB writer ──────────────────────────────────────────────
 def try_db(alert):
     try:
         sys.path.insert(0, os.path.dirname(BASE_DIR))
@@ -386,35 +348,40 @@ def try_db(alert):
         insert_alert(alert)
     except: pass
 
-# ── Main ───────────────────────────────────────────────────
+# ── Main Loop ──────────────────────────────────────────────
 def run():
     os.makedirs(LOG_DIR, exist_ok=True)
     os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
 
-    for f in (BASELINE_FILE, PROC_STATE_FILE, CMDLINE_STATE_FILE, TIMESTAMP_FILE):
-        try: os.remove(f)
-        except: pass
+    try: os.remove(BASELINE_FILE)
+    except: pass
+
+    # Start Real-Time Data Threads
+    threading.Thread(target=proc_poller_thread, daemon=True).start()
+    threading.Thread(target=audit_tailer_thread, daemon=True).start()
 
     session_id = str(uuid.uuid4())[:8]
     scan = 0
     last_t = last_evt = None
-    stats = {"alerts":0,"suppressed":0,"scans":0,
-             "syscalls":0,"start":datetime.now().isoformat()}
+    stats = {"alerts":0,"suppressed":0,"scans":0, "syscalls":0,"start":datetime.now().isoformat()}
 
-    print(f"[HIDS] Started | UID={TARGET_UID} | session={session_id} | model={'ML' if MODEL_OK else 'rules'}")
+    print(f"[HIDS] Real-Time Monitor Started | UID={TARGET_UID} | session={session_id}")
 
     while True:
+        time.sleep(SCAN_INTERVAL) # Main loop only orchestrates
         scan += 1
         stats["scans"] += 1
         stats["syscalls"] += random.randint(350,600)
         now = datetime.now()
 
-        # ── Real feature collection ───────────────────────
-        proc  = collect_proc()
-        audit = collect_audit()
-        raw   = {**proc, **audit}
-        raw["bulk_operation"] = 1 if raw.get("open_count",0) > 20 else 0
+        # ── Capture and Reset Live Features ────────────────
+        with event_lock:
+            raw = dict(realtime_features)
+            # Reset event counters for the next window
+            for k in realtime_features:
+                realtime_features[k] = 0
 
+        raw["bulk_operation"] = 1 if raw.get("open_count",0) > 20 else 0
         is_calib = scan <= BASELINE_SCANS
 
         if is_calib:
@@ -468,8 +435,6 @@ def run():
             "features":features,"last_alert":last_evt if status in ("alert","suppressed") else None,
             "session_id":session_id,"stats":stats,
         })
-
-        time.sleep(SCAN_INTERVAL)
 
 if __name__ == "__main__":
     run()
